@@ -1,0 +1,38 @@
+{
+  "Enabled": true,
+  "AutomaticTestStations": false,
+  "TargetDisplayKeys": ["Level_GroundZero", "HiddenWarehouse", "Level_Farm", "Level_Farm_South"],
+  "StationsPerScene": 3,
+  "MinimumStationSeparation": 6,
+  "PlacementRetrySeconds": 10,
+  "FixedStations": [],
+  "Summon": {
+    "Cost": 100,
+    "Seconds": 15
+  },
+  "Riding": {
+    "NativeRidePose": true,
+    "NativeRidePoseValue": 0,
+    "RiderVisualHeight": 0,
+    "VehicleClearance": true,
+    "TurnDegreesPerSecond": 540,
+    "PedalAndGripPose": true,
+    "RideSpeedMultiplier": 1.5
+  },
+  "Persistence": {
+    "FullSaveSeconds": 20
+  },
+  "Ui": {
+    "InvoicePanelSide": "right",
+    "ShowWorldLabels": true,
+    "Sounds": true
+  },
+  "Keys": {
+    "Station": "F6",
+    "Mount": "F7",
+    "Loss": "F8",
+    "Diagnostics": "F9",
+    "Snapshot": "F10",
+    "Summon": "F5"
+  }
+}

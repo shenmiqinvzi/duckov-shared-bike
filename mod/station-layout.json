@@ -1,0 +1,17 @@
+{
+  "SchemaVersion": 1,
+  "Sites": [
+    { "Id": "gz-bunker", "Name": "零号区·地堡入口站", "MapId": "Level_GroundZero_Main", "SceneName": "Level_GroundZero_1", "Anchor": { "X": 455.72, "Y": -1.13, "Z": 103.62 }, "SearchRadius": 22, "Yaw": 90 },
+    { "Id": "gz-central", "Name": "零号区·中部路口站", "MapId": "Level_GroundZero_Main", "SceneName": "Level_GroundZero_1", "Anchor": { "X": 338.26, "Y": -0.05, "Z": 269.45 }, "SearchRadius": 22, "Yaw": 180 },
+    { "Id": "gz-east", "Name": "零号区·东侧返程站", "MapId": "Level_GroundZero_Main", "SceneName": "Level_GroundZero_1", "Anchor": { "X": 541.78, "Y": 0.288, "Z": 183.03 }, "SearchRadius": 22, "Yaw": 270 },
+    { "Id": "wh-entry", "Name": "仓库区·入口集散站", "MapId": "Level_HiddenWarehouse_Main", "SceneName": "Level_HiddenWarehouse", "Anchor": { "X": 440.25, "Y": 0, "Z": 124.70 }, "SearchRadius": 22, "Yaw": 0 },
+    { "Id": "wh-central", "Name": "仓库区·中部道路站", "MapId": "Level_HiddenWarehouse_Main", "SceneName": "Level_HiddenWarehouse", "Anchor": { "X": 168.40, "Y": 0, "Z": 177.43 }, "SearchRadius": 22, "Yaw": 90 },
+    { "Id": "wh-north", "Name": "仓库区·北侧返程站", "MapId": "Level_HiddenWarehouse_Main", "SceneName": "Level_HiddenWarehouse", "Anchor": { "X": 223.31, "Y": 0, "Z": 327.99 }, "SearchRadius": 22, "Yaw": 180 },
+    { "Id": "farm-south", "Name": "农场镇·南侧集散站", "MapId": "Level_Farm_Main", "SceneName": "Level_Farm_01", "Anchor": { "X": 315.93, "Y": 0.061, "Z": 273.45 }, "SearchRadius": 22, "Yaw": 0 },
+    { "Id": "farm-central", "Name": "农场镇·镇中转运站", "MapId": "Level_Farm_Main", "SceneName": "Level_Farm_01", "Anchor": { "X": 512.01, "Y": 0.061, "Z": 402.64 }, "SearchRadius": 22, "Yaw": 90 },
+    { "Id": "farm-north", "Name": "农场镇·北侧返程站", "MapId": "Level_Farm_Main", "SceneName": "Level_Farm_01", "Anchor": { "X": 527.30, "Y": 0, "Z": 731.30 }, "SearchRadius": 22, "Yaw": 180 }
+  ],
+  "Routes": [
+    { "SourceMap": "Level_GroundZero_Main", "TargetMap": "Level_HiddenWarehouse_Main", "Returnable": false }
+  ]
+}

@@ -1,0 +1,10 @@
+**/bin/
+**/obj/
+.dotnet-home/
+.nuget/
+artifacts/
+local.props
+*.user
+.python-tools/
+.pip-cache/
+__pycache__/
