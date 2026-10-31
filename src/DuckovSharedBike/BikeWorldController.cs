@@ -287,6 +287,7 @@ namespace DuckovSharedBike
             }
             var lease=_runtime.Engine?.CurrentRental;
             if (lease==null) { DestroyBike(); state.Vehicle=null; return; }
+            if (_summoning) return; // The ghost ride is in flight; the real bike spawns at CompleteSummon.
             var pose=state.Vehicle;
             if (pose==null || pose.VehicleId!=lease.VehicleId)
             {
@@ -577,6 +578,11 @@ namespace DuckovSharedBike
             _summonUntil=Time.unscaledTime+Mathf.Max(1f,_settings.Summon.Seconds);
             _summonStationId=station.Id;
             _summonVehicleId=vehicleId;
+            // The lease exists from this instant and SyncWorld validates the persisted pose
+            // every second, so the pose must point at the summon destination immediately,
+            // otherwise the very next sync closes the order as a missing vehicle.
+            _runtime.World.Vehicle=new VehiclePose { VehicleId=vehicleId,MapId=_mapId,SceneName=_sceneName,
+                Position=SafeGround.Point(_summonTo),Yaw=_summonYaw };
             _sounds.SummonTone();
             try { _runtime.Persist(true); }
             catch (Exception ex) { _log("Summon save pending: "+ex); TryCacheWorld(); }

@@ -11,7 +11,7 @@ namespace DuckovSharedBike
     // The game's loader resolves <info.ini name>.ModBehaviour.
     public sealed class ModBehaviour : Duckov.Modding.ModBehaviour
     {
-        public const string Version = "1.0.8";
+        public const string Version = "1.0.9";
         private const string LogPrefix = "[DuckovSharedBike] ";
         private bool _initialized;
         private bool _showPanel;
