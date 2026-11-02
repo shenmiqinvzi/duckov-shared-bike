@@ -16,7 +16,7 @@ internal static class RuntimeSettingsTests
             Equal("F9",settings.Keys.Diagnostics); Equal("F10",settings.Keys.Snapshot);
             Equal("F5",settings.Keys.Summon);
             Equal(100L,settings.Summon.Cost);
-            Equal(15f,settings.Summon.Seconds);
+            Equal(3f,settings.Summon.Seconds);
         });
         add("runtime settings accept explicit overrides",()=>
         {

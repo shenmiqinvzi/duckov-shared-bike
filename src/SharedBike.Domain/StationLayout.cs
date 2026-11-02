@@ -43,7 +43,7 @@ namespace DuckovSharedBike.Domain
     public sealed class SummonSettings
     {
         public long Cost { get; set; } = 100;
-        public float Seconds { get; set; } = 15;
+        public float Seconds { get; set; } = 3;
 
         public void Validate()
         {

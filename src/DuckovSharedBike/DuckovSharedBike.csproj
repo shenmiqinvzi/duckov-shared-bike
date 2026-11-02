@@ -3,7 +3,7 @@
     <TargetFramework>netstandard2.1</TargetFramework>
     <AssemblyName>DuckovSharedBike</AssemblyName>
     <RootNamespace>DuckovSharedBike</RootNamespace>
-    <Version>1.0.9</Version>
+    <Version>1.0.11</Version>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>

@@ -100,7 +100,8 @@ namespace DuckovSharedBike
             _summonKey=ParseKey(_settings.Keys.Summon,Key.F5,"Summon");
             DiagnosticsKey=ParseKey(_settings.Keys.Diagnostics,Key.F9,"Diagnostics");
             SnapshotKey=ParseKey(_settings.Keys.Snapshot,Key.F10,"Snapshot");
-            _sounds=new BikeSounds(log);
+            _sounds=new BikeSounds(log){Enabled=_settings.Ui.Sounds};
+            _log("sounds enabled="+_settings.Ui.Sounds+" outputSampleRate="+AudioSettings.outputSampleRate);
             _blueprints=StationSettingsFile.ReadBlueprints(Path.Combine(modPath,"station-layout.json"));
             _assets=new PrototypeAssets(modPath,log);
             _riderPose=new NativeRiderPose(_settings.Riding,log);
@@ -920,10 +921,10 @@ namespace DuckovSharedBike
                 switch (result.Code)
                 {
                     case RuleCode.Success:
-                        if (_settings.Ui.Sounds) _sounds.PaidChime();
+                        _sounds.PaidChime();
                         return prefix+"，本次费用"+total+"元已自动扣款。";
                     case RuleCode.InsufficientCash:
-                        if (_settings.Ui.Sounds) _sounds.ShortChime();
+                        _sounds.ShortChime();
                         return prefix+"，本次费用"+total+"元；现金不足，请在站点或马蜂自提点补付。";
                     case RuleCode.PaymentBusy:
                         return prefix+"，本次费用"+total+"元；当前无法立即扣款，请在站点或马蜂自提点补付。";

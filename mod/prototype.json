@@ -8,7 +8,7 @@
   "FixedStations": [],
   "Summon": {
     "Cost": 100,
-    "Seconds": 15
+    "Seconds": 3
   },
   "Riding": {
     "NativeRidePose": true,
