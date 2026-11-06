@@ -29,7 +29,7 @@
   },
   "Keys": {
     "Station": "F6",
-    "Mount": "F7",
+    "Mount": "F",
     "Loss": "F8",
     "Diagnostics": "F9",
     "Snapshot": "F10",

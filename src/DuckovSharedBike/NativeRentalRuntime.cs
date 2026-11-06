@@ -2,6 +2,7 @@ using System;
 using System.Globalization;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Linq;
 using DuckovSharedBike.Domain;
 using Newtonsoft.Json;
 using Saves;
@@ -192,12 +193,35 @@ namespace DuckovSharedBike
             }
             try
             {
-                _receipts = SavesSystem.KeyExisits(ReceiptsKey)
-                    ? JsonConvert.DeserializeObject<ReceiptState>(SavesSystem.Load<string>(ReceiptsKey), JsonSettings)
-                    : new ReceiptState { SaveId = saveId };
-                if (_receipts==null || _receipts.SaveId!=saveId) throw new InvalidOperationException("Cash receipts belong to another save.");
-                CashJournalValidation.Validate(_receipts.Receipts,engine.Snapshot());
-                _paymentFault=_receipts.Faulted;
+                var raw=SavesSystem.KeyExisits(ReceiptsKey) ? SavesSystem.Load<string>(ReceiptsKey) : null;
+                if (string.IsNullOrWhiteSpace(raw))
+                {
+                    // Missing or empty receipts are not damage: an untouched save simply has nothing to reconcile.
+                    _receipts=new ReceiptState { SaveId = saveId };
+                    _paymentFault=false;
+                }
+                else
+                {
+                    var restored=JsonConvert.DeserializeObject<ReceiptState>(raw,JsonSettings);
+                    if (restored==null || (restored.SaveId!=saveId && restored.Receipts.Count==0))
+                    {
+                        _receipts=new ReceiptState { SaveId=saveId }; _paymentFault=false;
+                    }
+                    else
+                    {
+                        if (restored.SaveId!=saveId) throw new InvalidOperationException("Cash receipts belong to another save.");
+                        _receipts=restored;
+                        CashJournalValidation.Validate(_receipts.Receipts,engine.Snapshot());
+                        _paymentFault=_receipts.Faulted;
+                        if (_paymentFault && _receipts.Receipts.Count==0
+                            && engine.Snapshot().Orders.All(o=>o.PaymentStatus==PaymentStatus.Paid))
+                        {
+                            // A fault flag with no receipts and nothing pending protects nothing and would block this save forever.
+                            _receipts.Faulted=false; _paymentFault=false; _savePending=true;
+                            _log("Stale payment fault flag cleared; nothing left to reconcile.");
+                        }
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -581,6 +605,9 @@ namespace DuckovSharedBike
                 _savePending=true;
                 CacheState();
                 _log("Death settlement created order=" + closed.Id + " total=" + _engine.FindOrder(closed.Id!)!.Total);
+                // The death screen offers "quit"; a settlement that only lives in memory would resurrect the lease.
+                try { Persist(true); _savePending=false; }
+                catch (Exception save) { RecordSaveFailure(save); }
             }
             catch (Exception ex) { RecordSaveFailure(ex); }
         }

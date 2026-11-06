@@ -6,16 +6,17 @@ internal static class CompleteReleaseTests
 {
     internal static void Register(Action<string,Action> add)
     {
-        add("release lays out three stations in each of the three installed physical scenes",()=>
+        add("release lays out a denser station network ordered farm > warehouse > ground zero",()=>
         {
-            var layout=Layout(); Equal(9,layout.Sites.Count);
-            foreach (var pair in new[] {
-                ("Level_GroundZero_Main","Level_GroundZero_1"),
-                ("Level_HiddenWarehouse_Main","Level_HiddenWarehouse"),
-                ("Level_Farm_Main","Level_Farm_01") })
-                Equal(3,layout.Sites.Count(s=>s.MapId==pair.Item1 && s.SceneName==pair.Item2));
+            var layout=Layout(); Equal(15,layout.Sites.Count);
+            var farm=layout.Sites.Count(s=>s.MapId=="Level_Farm_Main" && s.SceneName=="Level_Farm_01");
+            var warehouse=layout.Sites.Count(s=>s.MapId=="Level_HiddenWarehouse_Main" && s.SceneName=="Level_HiddenWarehouse");
+            var groundZero=layout.Sites.Count(s=>s.MapId=="Level_GroundZero_Main" && s.SceneName=="Level_GroundZero_1");
+            Equal(6,farm); Equal(5,warehouse); Equal(4,groundZero);
+            True(farm>warehouse && warehouse>groundZero);
+            Equal(layout.Sites.Count,farm+warehouse+groundZero);
             True(layout.Sites.All(s=>s.Anchor.IsFinite && s.SearchRadius>=6 && s.SearchRadius<=40));
-            Equal(9,layout.Sites.Select(s=>s.Id).Distinct().Count());
+            Equal(15,layout.Sites.Select(s=>s.Id).Distinct().Count());
         });
         add("native one-way warehouse route cannot strand a parked rented bicycle",()=>
         {
@@ -45,7 +46,7 @@ internal static class CompleteReleaseTests
             var layout=Layout(); layout.Sites.Add(layout.Sites[0]); Throws<InvalidOperationException>(layout.Validate);
             layout=Layout(); layout.Routes.Add(layout.Routes[0]); Throws<InvalidOperationException>(layout.Validate);
         });
-        add("release disables temporary test stations while retaining all nine planned sites",()=>
+        add("release disables temporary test stations while retaining the full planned network",()=>
         {
             var settings=StationSettingsFile.Read(Path.Combine(ProjectRoot(),"mod","prototype.json"));
             True(settings.Enabled); True(!settings.AutomaticTestStations); Equal(3,settings.StationsPerScene);

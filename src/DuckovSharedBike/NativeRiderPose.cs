@@ -22,6 +22,7 @@ namespace DuckovSharedBike
         private bool _wroteType;
         private bool _unavailableLogged;
         private bool _failed;
+        private int _appliedFrame=-1;
         private ProceduralRiderRig? _rig;
 
         internal NativeRiderPose(RidingPresentationSettings settings,Action<string> log) { _settings=settings; _log=log; }
@@ -73,6 +74,9 @@ namespace DuckovSharedBike
         internal void LateTick(BicycleVisual? bike)
         {
             if (_failed || _model==null || _actor==null || _model!=_actor.characterModel) return;
+            // CharacterModel.LateUpdate and BikeWorldController.LateTick both fire in one frame; the second pass only repeats IK.
+            if (_appliedFrame==Time.frameCount) return;
+            _appliedFrame=Time.frameCount;
             try
             {
                 if (_rig!=null && bike!=null) { _rig.Apply(_actor,bike,_settings.RiderVisualHeight); return; }

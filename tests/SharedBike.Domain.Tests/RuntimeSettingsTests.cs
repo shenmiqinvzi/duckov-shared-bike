@@ -12,7 +12,7 @@ internal static class RuntimeSettingsTests
             Equal("right",settings.Ui.InvoicePanelSide);
             True(settings.Ui.ShowWorldLabels);
             True(settings.Ui.Sounds);
-            Equal("F6",settings.Keys.Station); Equal("F7",settings.Keys.Mount); Equal("F8",settings.Keys.Loss);
+            Equal("F6",settings.Keys.Station); Equal("F",settings.Keys.Mount); Equal("F8",settings.Keys.Loss);
             Equal("F9",settings.Keys.Diagnostics); Equal("F10",settings.Keys.Snapshot);
             Equal("F5",settings.Keys.Summon);
             Equal(100L,settings.Summon.Cost);

@@ -34,7 +34,7 @@ namespace DuckovSharedBike.Domain
     public sealed class KeyBindingSettings
     {
         public string Station { get; set; } = "F6";
-        public string Mount { get; set; } = "F7";
+        public string Mount { get; set; } = "F";
         public string Loss { get; set; } = "F8";
         public string Diagnostics { get; set; } = "F9";
         public string Snapshot { get; set; } = "F10";

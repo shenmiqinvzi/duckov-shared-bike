@@ -32,10 +32,14 @@ namespace DuckovSharedBike
         private Vector3 _landing;
         private float _nextSync;
         private float _nextPlacement;
+        private string _pendingSignature="";
         private float _nextNotice;
         private float _toastUntil;
         private string _toast="";
         private bool _worldFailed;
+        private float _nextFaultRetry;
+        private int _faultRetries;
+        private string _faultScene="";
         private bool _confirmLoss;
         private Vector3 _lastRidePosition;
         private Quaternion _lastRideRotation;
@@ -44,15 +48,21 @@ namespace DuckovSharedBike
         private float _mountGuardUntil;
         private bool _guardLogged;
         private float _nextGuardLog;
+        private bool _damagedPending;
         private bool _markersLogged;
         private float _nextMarkerSync;
         private readonly List<InteractableBase> _nativeTravelPoints=new List<InteractableBase>();
         private readonly HashSet<int> _loggedTravelPoints=new HashSet<int>();
         private float _nextTravelScan;
+        private StationRecord? _cachedStation;
+        private float _cachedStationAt=-1f;
+        private float _cachedStationRadius=-1f;
+        private Vector3 _cachedStationOrigin;
         private float _nextNativePromptLog;
         private string _visualSummary="尚未创建模型";
         private string _speedSummary="尚无骑行速度数据";
         internal string SpeedSummary => _speedSummary;
+        internal string FaultSummary => _worldFailed ? "单车场景已暂停（自动重启尝试 "+_faultRetries+" 次，F9 面板可手动重新启用）" : "";
         internal float RideSpeedMultiplier => _settings.Riding.RideSpeedMultiplier;
         private Key _stationKey=Key.F6;
         private Key _mountKey=Key.F7;
@@ -125,8 +135,10 @@ namespace DuckovSharedBike
         {
             try
             {
+                if (_damagedPending && Time.timeScale>0) { _damagedPending=false; ForceDismountOnDamage(); }
                 if (Transition && Time.unscaledTime>=_transitionUntil && Time.timeScale>0) CompleteTransition();
                 if (_summoning && Time.unscaledTime>=_summonUntil && Time.timeScale>0) CompleteSummon();
+                if (_worldFailed) TryRecoverWorldFault();
                 if (Time.unscaledTime>=_nextSync)
                 {
                     _nextSync=Time.unscaledTime+1;
@@ -138,15 +150,18 @@ namespace DuckovSharedBike
                 if (keyboard!=null)
                 {
                     if (keyboard.escapeKey.wasPressedThisFrame) { _dialogStation=null; _confirmLoss=false; }
-                    if (keyboard[_stationKey].wasPressedThisFrame)
+                    if (!NativeUiOpen())
                     {
-                        var nearest=NearestStation(3);
-                        if (nearest!=null) OpenStation(nearest.Id);
-                        else Notify("请先靠近共享单车站点。");
+                        if (keyboard[_stationKey].wasPressedThisFrame)
+                        {
+                            var nearest=NearestStation(3);
+                            if (nearest!=null) OpenStation(nearest.Id);
+                            else Notify("请先靠近共享单车站点。");
+                        }
+                        if (keyboard[_mountKey].wasPressedThisFrame) TryMountOrDismount();
+                        if (keyboard[_lossKey].wasPressedThisFrame && _runtime.HasVehicleDebt) _confirmLoss=true;
+                        if (keyboard[_summonKey].wasPressedThisFrame) Summon();
                     }
-                    if (keyboard[_mountKey].wasPressedThisFrame) TryMountOrDismount();
-                    if (keyboard[_lossKey].wasPressedThisFrame && _runtime.HasVehicleDebt) _confirmLoss=true;
-                    if (keyboard[_summonKey].wasPressedThisFrame) Summon();
                 }
             }
             catch (Exception ex) { RecoverWorldFault(ex); }
@@ -180,18 +195,35 @@ namespace DuckovSharedBike
                 }
                 if (actor.HeadInWater)
                 {
-                    var rental=_runtime.Engine!.CurrentRental!;
-                    _runtime.Engine.SetRiding(rental.VehicleId,false); _rider=null; _returnAfterDismount=null; _transitionUntil=0;
+                    var engine=_runtime.Engine; var rental=engine?.CurrentRental;
+                    if (engine!=null && rental!=null) engine.SetRiding(rental.VehicleId,false);
+                    _rider=null; _returnAfterDismount=null; _transitionUntil=0;
                     EndRiderPresentation(); TryCacheWorld();
                     Notify("水域无法骑行，已下车；车辆停在上次位置，租赁继续。",true); return;
                 }
                 var candidate=actor.transform.position;
                 if (_trackingRide && Vector3.Distance(candidate,_lastRidePosition)>BicycleGeometry.MaxContinuousStep)
                 {
-                    var rental=_runtime.Engine!.CurrentRental!;
-                    _runtime.Engine.SetRiding(rental.VehicleId,false); _rider=null; _returnAfterDismount=null; _transitionUntil=0;
+                    var jump=Vector3.Distance(candidate,_lastRidePosition);
+                    if (jump<=15f)
+                    {
+                        // The game itself rewrites the player position on stairs, stuck recovery and travel points.
+                        // Anything under 15m is one of those corrections: move the bike along instead of ending the ride.
+                        _log("Ride position jump "+jump.ToString("0.0")+"m, bike follows to x="+candidate.x.ToString("0.0")
+                            +" z="+candidate.z.ToString("0.0"));
+                        var followRotation=SafeGround.GroundRotation(candidate,_lastRideRotation.eulerAngles.y,actor);
+                        _bike.transform.SetPositionAndRotation(candidate,followRotation);
+                        if (_bikeMarker!=null) _bikeMarker.transform.position=candidate;
+                        _lastRidePosition=candidate; _lastRideRotation=followRotation;
+                        _riderPose.LateTick(_bike.GetComponent<BicycleVisual>());
+                        return;
+                    }
+                    var engine=_runtime.Engine; var rental=engine?.CurrentRental;
+                    if (engine!=null && rental!=null) engine.SetRiding(rental.VehicleId,false);
+                    _rider=null; _returnAfterDismount=null; _transitionUntil=0;
                     EndRiderPresentation(); TryCacheWorld();
-                    Notify("检测到位置跳转，已停止骑行；车辆停留原处并继续计费。",true); return;
+                    _log("Ride ended after long jump "+jump.ToString("0.0")+"m");
+                    Notify("检测到远程传送，已停止骑行；车辆停留原处并继续计费。",true); return;
                 }
                 var direction=actor.movementControl.MoveInput; direction.y=0;
                 var rotation=_lastRideRotation;
@@ -236,6 +268,13 @@ namespace DuckovSharedBike
                 _riderPose.LateTick(_bike.GetComponent<BicycleVisual>());
         }
 
+        private static bool NativeUiOpen()
+        {
+            // Vanilla windows (inventory, storage, dialogs) must not receive our hotkeys behind their back.
+            try { if (Duckov.UI.View.ActiveView!=null) return true; } catch { }
+            try { if (Duckov.UI.StorageDock.Instance!=null && Duckov.UI.StorageDock.Instance.open) return true; } catch { }
+            return false;
+        }
         private void EndRiderPresentation()
         {
             _riderPose.Restore(); _trackingRide=false;
@@ -323,12 +362,18 @@ namespace DuckovSharedBike
             var fixedStations=_settings.FixedStations.Where(s=>s.MapId==_mapId && s.SceneName==_sceneName).ToArray();
             if (fixedStations.Length>0)
             {
-                if (fixedStations.Any(station=>state.Stations.Any(s=>s.Id==station.Id)))
-                    throw new InvalidOperationException("Fixed station ID conflicts with saved layout.");
+                var added=0;
                 foreach (var station in fixedStations)
                 {
-                    state.Stations.Add(station.Copy());
+                    // A layout conflict used to throw into Tick and permanently disable the whole scene.
+                    if (state.Stations.Any(s=>s.Id==station.Id))
+                    {
+                        _log("Fixed station ID conflict skipped id="+station.Id);
+                        continue;
+                    }
+                    state.Stations.Add(station.Copy()); added++;
                 }
+                if (added<fixedStations.Length) Notify("有站点与存档布局冲突，已跳过；详见日志。");
                 TryCacheWorld(); return;
             }
             if (!_settings.AutomaticTestStations) return;
@@ -358,12 +403,20 @@ namespace DuckovSharedBike
         {
             if (!_settings.Enabled) return;
             var changed=false;
+            var pending=new List<string>();
+            // One scene scan per placement pass: this used to run inside the 5x24 candidate loop (up to 120 full scans per site).
+            var scene=CurrentScene;
+            var countdownAreas=UnityEngine.Object.FindObjectsOfType<CountDownArea>()
+                .Where(a=>a!=null && a.gameObject.scene==scene)
+                .Select(a=>a.transform.position)
+                .ToArray();
             foreach (var site in _blueprints.Sites.Where(s=>s.MapId==_mapId && s.SceneName==_sceneName))
             {
                 if (state.Stations.Any(s=>s.Id==site.Id)) continue;
                 var anchor=SafeGround.Vector(site.Anchor); Vector3 chosen=default; var found=false;
                 if (UnityEngine.AI.NavMesh.SamplePosition(anchor,out var origin,8,UnityEngine.AI.NavMesh.AllAreas)) anchor=origin.position;
-                foreach (var radius in new[] { 10f,14f,18f,8f,site.SearchRadius })
+                // Finer radius ladder: a dense network needs the closest legal spot, not the first ring that fits.
+                foreach (var radius in new[] { 10f,14f,18f,22f,26f,8f,site.SearchRadius })
                 {
                     if (radius>site.SearchRadius) continue;
                     for (var i=0;i<24 && !found;i++)
@@ -372,16 +425,27 @@ namespace DuckovSharedBike
                         if (!SafeGround.Find(anchor,candidate,Actor!,out chosen) || !BicycleClearance.Fits(chosen,Quaternion.Euler(0,site.Yaw,0),Actor!)) continue;
                         if (NearestNativeTravel(chosen,6f)!=null) continue;
                         if (state.Stations.Any(s=>s.MapId==_mapId && s.SceneName==_sceneName && SpatialRules.Within(s.Position,SafeGround.Point(chosen),6))) continue;
-                        if (UnityEngine.Object.FindObjectsOfType<CountDownArea>().Any(a=>a.gameObject.scene==CurrentScene
-                            && Vector3.Distance(a.transform.position,chosen)<10)) continue;
+                        if (countdownAreas.Any(p=>Vector3.Distance(p,chosen)<10)) continue;
                         found=true;
                     }
                     if (found) break;
                 }
-                if (!found) { _log("Station site pending safe placement id="+site.Id); continue; }
+                if (!found) { pending.Add(site.Id); continue; }
                 state.Stations.Add(new StationRecord { Id=site.Id,Name=site.Name,MapId=site.MapId,SceneName=site.SceneName,
                     Position=SafeGround.Point(chosen),Yaw=site.Yaw }); changed=true;
                 _log("Station site placed id="+site.Id+" position="+chosen);
+            }
+            // The pass retries every PlacementRetrySeconds; log the pending set once instead of once per site per retry.
+            var signature=string.Join(",",pending);
+            if (pending.Count>0 && signature!=_pendingSignature)
+            {
+                _pendingSignature=signature;
+                _log("Station sites pending safe placement count="+pending.Count+" ids="+signature);
+            }
+            else if (pending.Count==0 && _pendingSignature.Length>0)
+            {
+                _pendingSignature="";
+                _log("All planned station sites placed scene="+_sceneName+" total="+state.Stations.Count(s=>s.SceneName==_sceneName));
             }
             if (changed) TryCacheWorld();
         }
@@ -407,7 +471,8 @@ namespace DuckovSharedBike
             // Keep the POI in the main scene the way the native factory intends; re-parenting it into the
             // sub-scene made the marker disappear when that sub-scene unloaded.
             var marker=Duckov.MiniMaps.SimplePointOfInterest.Create(root.transform.position,sceneId,name,_assets.Icon,false);
-            marker.Color=new Color(0.2f,0.86f,0.58f); marker.ScaleFactor=0.65f;
+            // POI colour is a multiply tint: tinting white keeps the badge's own palette instead of dyeing it green.
+            marker.Color=Color.white; marker.ScaleFactor=0.8f;
             _markers.Add(marker.gameObject);
             if (!_markersLogged) { _markersLogged=true; _log("Map markers active scene="+sceneId+" icon="+_assets.Icon.name); }
             return marker.gameObject;
@@ -416,7 +481,7 @@ namespace DuckovSharedBike
         private void RefreshNativeTravelPoints()
         {
             if (Time.unscaledTime<_nextTravelScan) return;
-            _nextTravelScan=Time.unscaledTime+2;
+            _nextTravelScan=Time.unscaledTime+10;
             _nativeTravelPoints.Clear();
             foreach (var teleporter in UnityEngine.Object.FindObjectsOfType<Duckov.Scenes.MultiSceneTeleporter>())
                 if (teleporter!=null && teleporter.gameObject.scene.isLoaded) _nativeTravelPoints.Add(teleporter);
@@ -521,7 +586,7 @@ namespace DuckovSharedBike
                 _runtime.Persist(true);
                 _log("Rent started station="+stationId+" vehicle="+vehicleId+" position="+point.x.ToString("0.00")+","+point.z.ToString("0.00"));
                 _sounds.RentTone();
-                Notify("租赁成功，靠近自行车按F7上车；不足1小时收费200元。",true);
+                Notify("租赁成功，靠近自行车按"+MountKeyText+"上车；不足1小时收费200元。",true);
             }
             catch (Exception ex)
             {
@@ -629,7 +694,7 @@ namespace DuckovSharedBike
                 try { _runtime.Persist(true); }
                 catch (Exception ex) { _log("Summon arrival save pending: "+ex); TryCacheWorld(); }
                 _log("Summon completed vehicle="+vehicleId+" at="+_summonTo.x.ToString("0.00")+","+_summonTo.z.ToString("0.00"));
-                Notify("自行车已送达，靠近按F7上车；不足1小时收费200元。",true);
+                Notify("自行车已送达，靠近按"+MountKeyText+"上车；不足1小时收费200元。",true);
             }
             catch (Exception ex)
             {
@@ -653,21 +718,26 @@ namespace DuckovSharedBike
         {
             if (!Ready || !Alive || Transition || _runtime.Engine==null) return;
             var actor=Actor!; var rental=_runtime.Engine.CurrentRental;
-            if (rental==null || _bike==null) { Notify("请先租车并靠近你租赁的自行车。"); return; }
+            // F is also the native interact key (doors, pickups, looting). Without a rented bike of our own,
+            // stay silent: otherwise every normal interaction would answer with a "rent a bike first" toast.
+            if (rental==null || _bike==null) return;
             if (_dialogStation!=null) return;
             if (IsRiding(actor))
             {
                 if (!FindLanding(actor,out _landing)) { Notify("附近没有安全下车位置，请移动到开阔地带。"); return; }
-                _mounting=false; _transitionUntil=Time.unscaledTime+1;
+                _mounting=false; _transitionUntil=Time.unscaledTime+0.35f;
             }
             else
             {
-                if (!SpatialRules.Within(SafeGround.Point(actor.transform.position),SafeGround.Point(_bike.transform.position),2)
-                    || !SafeGround.Clear(actor.transform.position,_bike.transform.position)) { Notify("请先靠近你租赁的自行车。"); return; }
+                var distance=Vector3.Distance(actor.transform.position,_bike.transform.position);
+                // Standing away from the bike (a door, a chest, an NPC) still counts as a native interaction.
+                if (distance>3f) return;
+                if (distance>2.6f || (distance>1.6f && !SafeGround.Clear(actor.transform.position,_bike.transform.position)))
+                { Notify("请先靠近你租赁的自行车。"); return; }
                 if (Duckov.UI.View.ActiveView!=null) { Notify("请先关闭当前界面再上车。"); return; }
                 if (actor.CurrentAction!=null && !actor.CurrentAction.StopAction()) { Notify("当前动作尚未结束，请稍后上车。"); return; }
                 actor.CancleSkill(); actor.Trigger(false,false,true); actor.SetAdsInput(false); actor.SetRunInput(false);
-                _mounting=true; _transitionUntil=Time.unscaledTime+1; _rider=actor;
+                _mounting=true; _transitionUntil=Time.unscaledTime+0.35f; _rider=actor;
             }
             Notify(_mounting ? "正在上车…" : "正在下车…",true);
         }
@@ -678,7 +748,57 @@ namespace DuckovSharedBike
             var right=_bike!=null ? _bike.transform.right : actor.transform.right;
             for (var i=0;i<8;i++)
                 if (SafeGround.Find(actor.transform.position,center+Quaternion.Euler(0,i*45,0)*right*1.15f,actor,out result)) return true;
+            // A bike parked on a kerb, a slope or beside a wall fails the strict probe; retry the same ring relaxed
+            // so "the bike is right there but I cannot get on" stops happening.
+            for (var i=0;i<8;i++)
+                if (SafeGround.Find(actor.transform.position,center+Quaternion.Euler(0,i*45,0)*right*1.15f,actor,out result,true)) return true;
             result=default; return false;
+        }
+
+        private void FailMount(string reason,string message)
+        {
+            _mounting=false; _rider=null; _returnAfterDismount=null;
+            _log("Mount rejected: "+reason);
+            Notify(message,true);
+        }
+
+        private static float FlatDistance(Vector3 a,Vector3 b)
+        {
+            var delta=a-b; delta.y=0f; return delta.magnitude;
+        }
+
+        internal void OnRiderDamaged(Health health)
+        {
+            try
+            {
+                if (health==null || !Ready || _bike==null || _damagedPending) return;
+                var actor=Actor;
+                if (actor==null || actor.Health==null || actor.Health.IsDead) return;
+                // Only the player's own health matters, and only while actually riding.
+                if (health!=actor.Health) return;
+                if (!IsRiding(actor)) return;
+                // Damage is applied inside the game's hit pipeline; tearing down the rider pose there fights the
+                // game's own state, so just raise a flag and let Tick() handle it on the next frame.
+                _damagedPending=true;
+                _log("Damage while riding: health="+health.CurrentHealth.ToString("0.0")+"/"+health.MaxHealth.ToString("0.0"));
+            }
+            catch (Exception ex) { _log("Damage hook failed: "+ex.Message); }
+        }
+
+        private void ForceDismountOnDamage()
+        {
+            var actor=_rider;
+            var rental=_runtime.Engine?.CurrentRental;
+            if (actor==null || _bike==null || rental==null || !IsRiding(actor)) { _rider=null; return; }
+            if (!FindLanding(actor,out var landing)) landing=actor.transform.position;
+            CapturePose();
+            _runtime.Engine!.SetRiding(rental.VehicleId,false);
+            EndRiderPresentation();
+            _rider=null; _returnAfterDismount=null; _transitionUntil=0; _mounting=false;
+            actor.SetPosition(landing);
+            _log("Forced dismount on damage at x="+landing.x.ToString("0.0")+" z="+landing.z.ToString("0.0")
+                +" health="+(actor.Health!=null ? actor.Health.CurrentHealth.ToString("0.0") : "?"));
+            Notify("受到伤害，已立刻下车；车辆留在原地，租赁继续计费。",true);
         }
 
         private void CompleteTransition()
@@ -693,17 +813,51 @@ namespace DuckovSharedBike
             if (_mounting)
             {
                 var actor=Actor!;
-                if (Vector3.Distance(actor.transform.position,_bike.transform.position)>2.5f
-                    || !SafeGround.Clear(actor.transform.position,_bike.transform.position)
-                    || !SafeGround.Find(actor.transform.position,_bike.transform.position,actor,out var mountPosition)
-                    || Vector3.Distance(mountPosition,_bike.transform.position)>0.2f
-                    || (_settings.Riding.VehicleClearance && !BicycleClearance.Fits(mountPosition,_bike.transform.rotation,actor)))
-                { _rider=null; _returnAfterDismount=null; Notify("车辆附近空间不足或地面已变化，请调整位置再上车。",true); return; }
+                var bikePosition=_bike.transform.position;
+                var distance=Vector3.Distance(actor.transform.position,bikePosition);
+                // The wait before this call is short, but the player keeps walking: only a real walk-off is a failure.
+                if (distance>3.2f)
+                {
+                    FailMount("distance="+distance.ToString("0.00"),
+                        "你离车还有 "+distance.ToString("0.0")+" 米，靠近后按 "+MountKeyText+" 再上车。");
+                    return;
+                }
+                // Relaxed landing first: the bike was placed with the same clearance rules, so a strict re-check
+                // rejects perfectly normal parking spots (kerbs, slopes, next to a wall).
+                var groundFound=SafeGround.Find(actor.transform.position,bikePosition,actor,out var mountPosition,true);
+                var offset=groundFound ? FlatDistance(mountPosition,bikePosition) : float.MaxValue;
+                if (!groundFound || offset>0.9f)
+                {
+                    for (var i=0;i<8;i++)
+                    {
+                        var point=bikePosition+Quaternion.Euler(0,i*45f,0)*Vector3.forward*0.55f;
+                        if (!SafeGround.Find(actor.transform.position,point,actor,out var candidate,true)) continue;
+                        var candidateOffset=FlatDistance(candidate,bikePosition);
+                        if (candidateOffset>=offset) continue;
+                        mountPosition=candidate; offset=candidateOffset; groundFound=true;
+                    }
+                }
+                if (!groundFound || offset>1.2f)
+                {
+                    FailMount("ground="+(groundFound ? offset.ToString("0.00") : "none"),
+                        "车旁找不到能站的地面，把车挪到平地再上车。");
+                    return;
+                }
+                if (_settings.Riding.VehicleClearance && !BicycleClearance.Fits(mountPosition,_bike.transform.rotation,actor))
+                {
+                    if (offset>0.35f)
+                    {
+                        FailMount("clearance offset="+offset.ToString("0.00"),
+                            "车身贴得太紧，退开半步再按 "+MountKeyText+"。");
+                        return;
+                    }
+                    _log("Mount clearance advisory: bike sits tight, offset="+offset.ToString("0.00"));
+                }
                 var engine=_runtime.Engine!;
                 var expectedBike=_bike;
                 actor.SetPosition(mountPosition);
                 if (_runtime.Engine!=engine || _bike!=expectedBike || !Ready || !Alive || engine.CurrentRental?.RentalId!=rental.RentalId)
-                { _rider=null; _returnAfterDismount=null; return; }
+                { _mounting=false; _rider=null; _returnAfterDismount=null; return; }
                 engine.SetRiding(rental.VehicleId,true); _rider=actor;
                 _bike.transform.position=mountPosition;
                 _lastRidePosition=mountPosition; _lastRideRotation=_bike.transform.rotation; _trackingRide=true;
@@ -846,11 +1000,19 @@ namespace DuckovSharedBike
 
         private StationRecord? NearestStation(float radius)
         {
-            if (_runtime.World==null || Actor==null) return null;
-            return _runtime.World.Stations.Where(s=>s.MapId==_mapId && s.SceneName==_sceneName)
-                .Where(s=>SpatialRules.Within(SafeGround.Point(Actor.transform.position),s.Position,radius)
-                    && SafeGround.Clear(Actor.transform.position,SafeGround.Vector(s.Position)))
-                .OrderBy(s=>Vector3.Distance(Actor.transform.position,SafeGround.Vector(s.Position))).FirstOrDefault();
+            var actor=Actor;
+            if (actor==null || _runtime.World==null) return null;
+            var origin=actor.transform.position;
+            var now=Time.unscaledTime;
+            // IMGUI asks for this several times per frame and every answer costs a clearance raycast per station.
+            if (_cachedStationAt>=0f && now-_cachedStationAt<0.25f && Mathf.Approximately(radius,_cachedStationRadius)
+                && (_cachedStationOrigin-origin).sqrMagnitude<1f) return _cachedStation;
+            var result=_runtime.World.Stations.Where(s=>s.MapId==_mapId && s.SceneName==_sceneName)
+                .Where(s=>SpatialRules.Within(SafeGround.Point(origin),s.Position,radius)
+                    && SafeGround.Clear(origin,SafeGround.Vector(s.Position)))
+                .OrderBy(s=>Vector3.Distance(origin,SafeGround.Vector(s.Position))).FirstOrDefault();
+            _cachedStation=result; _cachedStationAt=now; _cachedStationRadius=radius; _cachedStationOrigin=origin;
+            return result;
         }
         private bool NearStation(string id,float radius) => _runtime.World?.Stations.Any(s=>s.Id==id && s.MapId==_mapId
             && s.SceneName==_sceneName && Actor!=null && SpatialRules.Within(SafeGround.Point(Actor.transform.position),s.Position,radius)
@@ -944,7 +1106,31 @@ namespace DuckovSharedBike
             _log("World prototype failure: "+ex);
             try { CloseRecovery(CloseReason.SystemRecovery); } catch (Exception recovery) { _log("Recovery pending: "+recovery); }
             DestroyActors(); _rider=null; _transitionUntil=0; _worldFailed=true;
+            var scene=CurrentScene;
+            var sceneName=scene.IsValid() ? scene.name : "";
+            if (sceneName!=_faultScene) { _faultScene=sceneName; _faultRetries=0; }
+            _faultRetries++;
+            // Three strikes per scene: retry quickly at first, then back off instead of hammering a broken scene.
+            _nextFaultRetry=Time.unscaledTime+(_faultRetries<=3 ? 10f : 120f);
             Notify("单车场景发生异常，已停止骑行，请查看模组日志。",true);
+        }
+        private void TryRecoverWorldFault()
+        {
+            // One bad frame must not disable the mod until the next save load: allow a bounded number of fresh starts.
+            if (_faultRetries>6 || Time.unscaledTime<_nextFaultRetry) return;
+            var scene=CurrentScene;
+            if (!scene.IsValid() || !scene.isLoaded || SceneLoader.IsSceneLoading) return;
+            if (scene.name!=_faultScene) { _faultScene=scene.name; _faultRetries=0; }
+            _log("World retrying after fault attempt="+(_faultRetries+1)+" scene="+scene.name);
+            _faultRetries++; _nextFaultRetry=Time.unscaledTime+10f;
+            _worldFailed=false; _nextPlacement=0;
+            Notify("单车场景已重新尝试启用。",true);
+        }
+        internal string ReenableAfterFault()
+        {
+            // Manual escape hatch for the diagnostics panel; it also resets the retry budget.
+            _faultRetries=0; _faultScene=""; _worldFailed=false; _nextPlacement=0; _nextSync=0;
+            return "已重新启用单车场景";
         }
         private void TryCacheWorld()
         {
@@ -960,6 +1146,7 @@ namespace DuckovSharedBike
         }
         private void DestroyActors()
         {
+            _cachedStation=null; _cachedStationAt=-1f;
             DestroyBike(); _bikeMarker=null; foreach (var station in _stations.Values) if (station!=null) UnityEngine.Object.Destroy(station);
             _stations.Clear(); foreach (var marker in _markers) if (marker!=null) UnityEngine.Object.Destroy(marker); _markers.Clear();
         }

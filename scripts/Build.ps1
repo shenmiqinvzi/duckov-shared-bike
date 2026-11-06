@@ -28,6 +28,7 @@ $files = @(
     @{ Source = (Join-Path $buildOutput 'DuckovSharedBike.pdb'); Name = 'DuckovSharedBike.pdb' },
     @{ Source = (Join-Path $projectRoot 'mod\info.ini'); Name = 'info.ini' },
     @{ Source = $preview; Name = 'preview.png' },
+    @{ Source = (Join-Path $projectRoot 'mod\marker.png'); Name = 'marker.png' },
     @{ Source = (Join-Path $projectRoot 'mod\prototype.json'); Name = 'prototype.json' },
     @{ Source = (Join-Path $projectRoot 'mod\station-layout.json'); Name = 'station-layout.json' },
     @{ Source = (Join-Path $projectRoot 'mod\README.txt'); Name = 'README.txt' },

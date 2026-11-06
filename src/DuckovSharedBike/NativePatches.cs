@@ -13,15 +13,20 @@ namespace DuckovSharedBike
     {
         private const string Owner = "DuckovSharedBike.Prototype";
         private readonly Harmony _harmony = new Harmony(Owner);
+        private BikeWorldController? _world;
         [ThreadStatic] private static int _speedScope;
         [ThreadStatic] private static bool _bypass;
         internal static BikeWorldController? World;
         internal static bool PaymentMutation;
         internal static bool PaymentCommit;
         internal static string? AtomicSavePath;
+        private static string? _commitFallback;
 
         internal void Enable(BikeWorldController world)
         {
+            // A leftover patch set from an earlier instance (hot reload, duplicate DLL) must not mix with the new one.
+            try { _harmony.UnpatchAll(Owner); } catch { }
+            _world=world;
             World = world;
             try
             {
@@ -62,6 +67,8 @@ namespace DuckovSharedBike
                 Patch(typeof(CharacterModelAudioPoster),"PostFootStepSound","FootstepPrefix");
                 Patch(typeof(CharacterModel),"LateUpdate",null,"RiderRigPostfix");
                 Patch(typeof(CharacterMainControl),"get_AnimationMoveSpeedValue","AnimationSpeedPrefix");
+                // 受伤立刻下车：探针放在 Health.Hurt 上，只比较这次调用前后的血量，不改变原方法行为。
+                Patch(typeof(Health),"Hurt","HurtPrefix","HurtPostfix");
             }
             catch { Disable(); throw; }
         }
@@ -69,7 +76,9 @@ namespace DuckovSharedBike
         internal void Disable()
         {
             _harmony.UnpatchAll(Owner);
-            World = null;
+            // A newer instance may already own the static slot; only clear the one we published.
+            if (ReferenceEquals(World, _world)) World = null;
+            _world = null;
             _speedScope = 0;
             PaymentMutation = false;
             PaymentCommit = false;
@@ -247,10 +256,23 @@ namespace DuckovSharedBike
         }
         private static bool AtomicCommitPrefix(ES3Settings __0)
         {
-            if (AtomicSavePath==null || __0.location!=ES3.Location.File
+            if (AtomicSavePath==null || __0==null || __0.location!=ES3.Location.File
                 || !string.Equals(System.IO.Path.GetFullPath(__0.FullPath),AtomicSavePath,StringComparison.OrdinalIgnoreCase)) return true;
-            AtomicFileCommit.Commit(AtomicSavePath,new SystemAtomicFileOperations());
-            return false;
+            try
+            {
+                AtomicFileCommit.Commit(AtomicSavePath,new SystemAtomicFileOperations());
+                return false;
+            }
+            catch (Exception ex)
+            {
+                // Antivirus, cloud sync or a non-NTFS volume can reject File.Replace; the game's own commit must still run.
+                if (!string.Equals(_commitFallback,ex.GetType().Name+": "+ex.Message,StringComparison.Ordinal))
+                {
+                    _commitFallback=ex.GetType().Name+": "+ex.Message;
+                    UnityEngine.Debug.LogWarning("[DuckovSharedBike] Atomic commit fell back to the native path: "+ex.Message);
+                }
+                return true;
+            }
         }
         private static Exception? SaveFileFinalizer(string? __state,Exception? __exception)
         {
@@ -270,6 +292,15 @@ namespace DuckovSharedBike
         {
             if (World?.IsRiding(__instance)!=true) return true;
             __result=0; return false;
+        }
+        private static void HurtPrefix(Health __instance,out float __state)
+            => __state = __instance!=null ? __instance.CurrentHealth : -1f;
+        private static void HurtPostfix(Health __instance,float __state)
+        {
+            if (__instance==null || __state<0f) return;
+            // 只认真正掉血的伤害：无敌帧、完全被护甲吸收的调用不触发下车。
+            if (__instance.CurrentHealth>=__state-0.0001f) return;
+            World?.OnRiderDamaged(__instance);
         }
     }
 }

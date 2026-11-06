@@ -126,7 +126,11 @@ namespace DuckovSharedBike
             }
             else if (engine.HasUnpaidOrders)
                 GUI.Label(new Rect(x+20,y+269,510,86),"你有未支付订单，请在任意站点还车时补付，或到马蜂自提点付款后再租车。",label);
-            else if (GUI.Button(new Rect(x+20,y+313,320,43),"租赁一辆自行车",button)) Rent(_dialogStation!);
+            else if (GUI.Button(new Rect(x+20,y+313,320,43),"租赁一辆自行车",button))
+            {
+                // A thrown exception here used to escape OnGUI and take the whole HUD down with it.
+                try { Rent(_dialogStation!); } catch (Exception ex) { _log("Rent interrupted: "+ex); Notify("租车未完成，请保留日志后重试。",true); }
+            }
             if (GUI.Button(new Rect(x+355,y+313,175,43),"关闭",button)) _dialogStation=null;
         }
 
@@ -171,7 +175,8 @@ namespace DuckovSharedBike
             foreach (var order in orders.Skip(_invoicePage*2).Take(2))
             {
                 var top=y+134+row*211;
-                var rental=snapshot.Rentals.Single(r=>r.RentalId==order.RentalId);
+                var rental=snapshot.Rentals.FirstOrDefault(r=>r.RentalId==order.RentalId);
+                if (rental==null) { row++; continue; } // Orphan order (restored save): show nothing instead of throwing every IMGUI event.
                 var number=order.OrderId.Length>14 ? order.OrderId.Substring(order.OrderId.Length-8) : order.OrderId;
                 GUI.Label(new Rect(x+16,top,388,162),
                     "订单 #"+number+"｜"+CloseText(order.CloseReason)+"\n租车："+StationName(rental.RentStationId)

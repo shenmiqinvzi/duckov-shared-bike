@@ -20,6 +20,8 @@ namespace DuckovSharedBike
         private bool _materialsReady;
         private Texture2D? _iconTexture;
         private Sprite? _iconFallback;
+        private Texture2D? _iconFallbackTexture;
+        private bool _disposed;
         // 共享单车专用材质：与站点配色分离，车身改黑时站点保持绿/黄识别色。
         private Material? _bikeFrame;
         private Material? _bikeDark;
@@ -35,20 +37,42 @@ namespace DuckovSharedBike
         internal PrototypeAssets(string modPath, Action<string> log)
         {
             _log = log;
-            var path = Path.Combine(modPath, "preview.png");
-            if (File.Exists(path))
-            {
-                try
-                {
-                    _iconTexture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
-                    if (ImageConversion.LoadImage(_iconTexture, File.ReadAllBytes(path)))
-                        Icon = Sprite.Create(_iconTexture, new Rect(0, 0, _iconTexture.width, _iconTexture.height), new Vector2(0.5f, 0.5f));
-                }
-                catch (Exception ex) { _log("Preview icon unavailable: " + ex.Message); }
-            }
-            // A tiny generated icon keeps map markers visible even if preview.png is unreadable.
+            // 地图标记优先用 marker.png（站点徽章：八角牌 + 米白自行车 + 薄荷横杠），
+            // 它是一张独立图，和模组列表卡 preview.png 分开；缺图时退回 preview.png，再退回程序绘制的同款徽章。
+            Icon = LoadIcon(modPath, "marker.png");
+            if (Icon == null) Icon = LoadIcon(modPath, "preview.png");
             _iconFallback = CreateFallbackIcon();
             if (Icon == null) Icon = _iconFallback;
+            _log("Map icon=" + (Icon != null ? Icon.name : "none"));
+        }
+
+        private Sprite? LoadIcon(string modPath, string fileName)
+        {
+            var path = Path.Combine(modPath, fileName);
+            if (!File.Exists(path)) return null;
+            Texture2D? texture = null;
+            try
+            {
+                texture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+                if (!ImageConversion.LoadImage(texture, File.ReadAllBytes(path)))
+                {
+                    UnityEngine.Object.Destroy(texture);
+                    return null;
+                }
+                texture.name = "sbk-icon-" + fileName;
+                texture.wrapMode = TextureWrapMode.Clamp;
+                texture.filterMode = FilterMode.Bilinear;
+                _iconTexture = texture;
+                var sprite = Sprite.Create(texture, new Rect(0, 0, texture.width, texture.height), new Vector2(0.5f, 0.5f));
+                sprite.name = "SharedBike." + Path.GetFileNameWithoutExtension(fileName);
+                return sprite;
+            }
+            catch (Exception ex)
+            {
+                if (texture != null) UnityEngine.Object.Destroy(texture);
+                _log("Map icon " + fileName + " unavailable: " + ex.Message);
+                return null;
+            }
         }
 
         private void EnsureMaterials()
@@ -556,19 +580,104 @@ namespace DuckovSharedBike
             foreach (var transform in root.GetComponentsInChildren<Transform>(true)) transform.gameObject.layer = layer;
         }
 
+        // 程序绘制的同款站点徽章：八角牌（深板岩外沿 + 米白圈 + 薄荷内线 + 墨绿底），
+        // 上方薄荷横杠两侧橙色铆钉、下方一条薄荷横杠，中间米白自行车。
+        // marker.png 从 Mods 目录读不到时顶上，保证地图标记永远是这块牌子，不会退回成一张缩略图。
         private Sprite CreateFallbackIcon()
         {
-            var texture = new Texture2D(32, 32, TextureFormat.RGBA32, false);
-            var background = new Color(0.16f, 0.22f, 0.26f, 1f);
-            var accent = new Color(0.2f, 0.86f, 0.58f, 1f);
-            for (var y = 0; y < 32; y++)
-                for (var x = 0; x < 32; x++)
+            const int size = 128;
+            const int samples = 4;
+            var texture = new Texture2D(size, size, TextureFormat.RGBA32, false) { name = "sbk-icon-fallback" };
+            var pixels = new Color[size * size];
+            var step = 2f / (size * samples);
+            for (var py = 0; py < size; py++)
+                for (var px = 0; px < size; px++)
                 {
-                    var ring = Mathf.Abs(Mathf.Sqrt((x - 16) * (x - 16) + (y - 16) * (y - 16)) - 10f) < 2.2f;
-                    texture.SetPixel(x, y, ring ? accent : background);
+                    float r = 0f, g = 0f, b = 0f;
+                    var covered = 0;
+                    for (var sy = 0; sy < samples; sy++)
+                        for (var sx = 0; sx < samples; sx++)
+                        {
+                            var x = -1f + (px * samples + sx + 0.5f) * step;
+                            var y = -1f + (py * samples + sy + 0.5f) * step;
+                            if (!BadgeSample(x, y, out var color)) continue;
+                            r += color.r; g += color.g; b += color.b; covered++;
+                        }
+                    pixels[py * size + px] = covered == 0
+                        ? Color.clear
+                        : new Color(r / covered, g / covered, b / covered, covered / (float)(samples * samples));
                 }
+            texture.SetPixels(pixels);
             texture.Apply(false);
-            return Sprite.Create(texture, new Rect(0, 0, 32, 32), new Vector2(0.5f, 0.5f));
+            texture.wrapMode = TextureWrapMode.Clamp;
+            _iconFallbackTexture = texture;
+            return Sprite.Create(texture, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f));
+        }
+
+        private static readonly Color BadgeRim = new Color(0.09f, 0.157f, 0.184f);
+        private static readonly Color BadgeCream = new Color(0.965f, 0.941f, 0.867f);
+        private static readonly Color BadgeMintEdge = new Color(0.34f, 0.5f, 0.45f);
+        private static readonly Color BadgeNavy = new Color(0.141f, 0.204f, 0.227f);
+        private static readonly Color BadgeMintBar = new Color(0.624f, 0.788f, 0.682f);
+        private static readonly Color BadgeRivet = new Color(0.886f, 0.639f, 0.427f);
+
+        private static bool BadgeSample(float x, float y, out Color color)
+        {
+            // 正八角形：八条等距边，内切半径 0.985（未裁边）。
+            var octagon = Mathf.Max(Mathf.Max(Mathf.Abs(x), Mathf.Abs(y)), (Mathf.Abs(x) + Mathf.Abs(y)) * 0.70710678f);
+            if (octagon > 0.985f) { color = Color.clear; return false; }
+            if (octagon > 0.912f) { color = BadgeRim; return true; }
+            if (octagon > 0.806f) { color = BadgeCream; return true; }
+            if (octagon > 0.752f) { color = BadgeMintEdge; return true; }
+            if (BikeGlyph(x, y))
+            {
+                color = Mathf.Sqrt(x * x + (y + 0.2f) * (y + 0.2f)) < 0.055f ? BadgeRivet : BadgeCream;
+                return true;
+            }
+            if (RoundedBox(x, y, 0f, 0.585f, 0.275f, 0.052f, 0.052f)) { color = BadgeMintBar; return true; }
+            if (Mathf.Sqrt((x + 0.415f) * (x + 0.415f) + (y - 0.585f) * (y - 0.585f)) < 0.055f
+                || Mathf.Sqrt((x - 0.415f) * (x - 0.415f) + (y - 0.585f) * (y - 0.585f)) < 0.055f) { color = BadgeRivet; return true; }
+            if (RoundedBox(x, y, 0f, -0.66f, 0.275f, 0.052f, 0.052f)) { color = BadgeMintBar; return true; }
+            color = BadgeNavy;
+            return true;
+        }
+
+        private static bool BikeGlyph(float x, float y)
+        {
+            const float hubX = 0.40f, hubY = -0.20f, wheel = 0.255f, stroke = 0.05f;
+            if (Mathf.Abs(Mathf.Sqrt((x + hubX) * (x + hubX) + (y - hubY) * (y - hubY)) - wheel) < stroke) return true;
+            if (Mathf.Abs(Mathf.Sqrt((x - hubX) * (x - hubX) + (y - hubY) * (y - hubY)) - wheel) < stroke) return true;
+            var seat = new Vector2(-0.20f, 0.16f);
+            var head = new Vector2(0.28f, 0.16f);
+            var bottom = new Vector2(0f, -0.20f);
+            var crown = new Vector2(0.30f, 0.02f);
+            if (Segment(x, y, bottom.x, bottom.y, seat.x, seat.y) < stroke) return true;
+            if (Segment(x, y, seat.x, seat.y, head.x, head.y) < stroke) return true;
+            if (Segment(x, y, head.x, head.y, crown.x, crown.y) < stroke) return true;
+            if (Segment(x, y, crown.x, crown.y, bottom.x, bottom.y) < stroke) return true;
+            if (Segment(x, y, bottom.x, bottom.y, -hubX, hubY) < stroke) return true;
+            if (Segment(x, y, seat.x, seat.y, -hubX, hubY) < stroke) return true;
+            if (Segment(x, y, crown.x, crown.y, hubX, hubY) < stroke) return true;
+            if (Segment(x, y, head.x, head.y, head.x + 0.16f, head.y + 0.04f) < stroke) return true;
+            if (Segment(x, y, seat.x - 0.10f, seat.y + 0.06f, seat.x + 0.10f, seat.y + 0.06f) < stroke) return true;
+            return false;
+        }
+
+        private static float Segment(float px, float py, float ax, float ay, float bx, float by)
+        {
+            var dx = bx - ax; var dy = by - ay;
+            var length = dx * dx + dy * dy;
+            var t = length <= 1e-6f ? 0f : Mathf.Clamp01(((px - ax) * dx + (py - ay) * dy) / length);
+            var cx = ax + dx * t; var cy = ay + dy * t;
+            return Mathf.Sqrt((px - cx) * (px - cx) + (py - cy) * (py - cy));
+        }
+
+        private static bool RoundedBox(float x, float y, float cx, float cy, float halfWidth, float halfHeight, float radius)
+        {
+            var dx = Mathf.Abs(x - cx) - (halfWidth - radius);
+            var dy = Mathf.Abs(y - cy) - (halfHeight - radius);
+            var outside = Mathf.Sqrt(Mathf.Max(dx, 0f) * Mathf.Max(dx, 0f) + Mathf.Max(dy, 0f) * Mathf.Max(dy, 0f));
+            return outside + Mathf.Min(Mathf.Max(dx, dy), 0f) - radius < 0f;
         }
 
         private static Transform Anchor(GameObject root,string name,Vector3 position)
@@ -594,13 +703,17 @@ namespace DuckovSharedBike
         }
         public void Dispose()
         {
+            if (_disposed) return;
+            _disposed = true;
             foreach (var material in new[] { _frame,_dark,_metal,_sign,_glow,_glowRed }) if (material != null) UnityEngine.Object.Destroy(material);
             foreach (var material in new[] { _bikeFrame,_bikeDark,_bikeMetal,_bikeEmber,_bikeEmberDim,_bikeCold,_bikePlate }) if (material != null) UnityEngine.Object.Destroy(material);
             if (_wornMetal != null) UnityEngine.Object.Destroy(_wornMetal);
             if (_plateTexture != null) UnityEngine.Object.Destroy(_plateTexture);
             if (Icon != null && Icon != _iconFallback) UnityEngine.Object.Destroy(Icon);
             if (_iconFallback != null) UnityEngine.Object.Destroy(_iconFallback);
+            if (_iconFallbackTexture != null) UnityEngine.Object.Destroy(_iconFallbackTexture);
             if (_iconTexture != null) UnityEngine.Object.Destroy(_iconTexture);
+            _iconFallback = null; _iconFallbackTexture = null; _iconTexture = null; Icon = null;
         }
     }
 
@@ -622,21 +735,32 @@ namespace DuckovSharedBike
             return Quaternion.LookRotation(forward,normal);
         }
         internal static bool Find(Vector3 origin, Vector3 candidate, CharacterMainControl actor, out Vector3 result)
+            => Find(origin,candidate,actor,out result,false);
+
+        // relaxed 供"上车"使用：车已经停在玩家眼前，唯一目标是找到一块能站的地面。
+        // 严格模式要求 NavMesh 连通、要求落点周围 0.4 米完全空旷，路边栏杆、墙根、树丛都会让它报失败，
+        // 而失败在游戏里只表现为"车就在眼前却上不去"。
+        internal static bool Find(Vector3 origin, Vector3 candidate, CharacterMainControl actor, out Vector3 result, bool relaxed)
         {
             result=default;
             var navMeshFound = NavMesh.SamplePosition(candidate,out var nav,2,NavMesh.AllAreas);
-            if (navMeshFound) candidate=nav.position;
+            if (navMeshFound && !relaxed) candidate=nav.position;
             if (!Physics.Raycast(candidate+Vector3.up*1.5f,Vector3.down,out var hit,4,~0,QueryTriggerInteraction.Ignore)) return false;
-            if (Vector3.Angle(hit.normal,Vector3.up)>35 || (navMeshFound && Mathf.Abs(hit.point.y-nav.position.y)>0.8f)) return false;
+            if (Vector3.Angle(hit.normal,Vector3.up)>(relaxed?58f:35f)) return false;
+            if (!relaxed && navMeshFound && Mathf.Abs(hit.point.y-nav.position.y)>0.8f) return false;
             candidate=hit.point+Vector3.up*0.025f;
-            foreach (var collider in Physics.OverlapCapsule(candidate+Vector3.up*0.55f,candidate+Vector3.up*1.25f,0.4f,~0,QueryTriggerInteraction.Ignore))
+            var radius=relaxed?0.22f:0.4f;
+            foreach (var collider in Physics.OverlapCapsule(candidate+Vector3.up*0.55f,candidate+Vector3.up*1.25f,radius,~0,QueryTriggerInteraction.Ignore))
                 if (!collider.transform.IsChildOf(actor.transform)) return false;
-            if (navMeshFound)
+            if (!relaxed)
             {
-                var path=new NavMeshPath();
-                if (!NavMesh.CalculatePath(origin,candidate,NavMesh.AllAreas,path) || path.status!=NavMeshPathStatus.PathComplete) return false;
+                if (navMeshFound)
+                {
+                    var path=new NavMeshPath();
+                    if (!NavMesh.CalculatePath(origin,candidate,NavMesh.AllAreas,path) || path.status!=NavMeshPathStatus.PathComplete) return false;
+                }
+                else if (!Clear(origin,candidate)) return false;
             }
-            else if (!Clear(origin,candidate)) return false;
             result=candidate; return true;
         }
         internal static bool Clear(Vector3 a,Vector3 b)
