@@ -14,10 +14,16 @@
 
 .PARAMETER RepoInfo
   Repository copy of info.ini (default mod\info.ini).
+
+.PARAMETER ItemId
+  Write this id straight into the repository info.ini instead of reading it back from the
+  installed copy. Use it when someone else uploaded the mod for you from their own account:
+  their item id never appears in your installed info.ini.
 #>
 param(
     [string]$GamePath = 'E:\Steam\steamapps\common\Escape from Duckov',
-    [string]$RepoInfo
+    [string]$RepoInfo,
+    [string]$ItemId
 )
 
 $ErrorActionPreference = 'Stop'
@@ -25,19 +31,26 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 if (-not $RepoInfo) { $RepoInfo = Join-Path $projectRoot 'mod\info.ini' }
 
 $installedInfo = Join-Path $GamePath 'Duckov_Data\Mods\DuckovSharedBike\info.ini'
-if (-not (Test-Path -LiteralPath $installedInfo -PathType Leaf)) {
-    throw "Installed info.ini not found: $installedInfo"
-}
 if (-not (Test-Path -LiteralPath $RepoInfo -PathType Leaf)) {
     throw "Repository info.ini not found: $RepoInfo"
 }
 
-$installedText = [System.IO.File]::ReadAllText($installedInfo, [System.Text.Encoding]::UTF8)
-$match = [regex]::Match($installedText, '(?m)^\s*publishedFileId\s*=\s*(\d+)\s*$')
-if (-not $match.Success) {
-    throw 'The installed info.ini has no publishedFileId yet. Upload the mod in game first.'
+if ($ItemId) {
+    if ($ItemId -notmatch '^\d+$') { throw "ItemId must be all digits, got: $ItemId" }
+    Write-Host "Using Workshop item id $ItemId from -ItemId"
+} else {
+    if (-not (Test-Path -LiteralPath $installedInfo -PathType Leaf)) {
+        throw "Installed info.ini not found: $installedInfo"
+    }
+
+    $installedText = [System.IO.File]::ReadAllText($installedInfo, [System.Text.Encoding]::UTF8)
+    $match = [regex]::Match($installedText, '(?m)^\s*publishedFileId\s*=\s*(\d+)\s*$')
+    if (-not $match.Success) {
+        throw 'The installed info.ini has no publishedFileId yet. Upload the mod in game first.'
+    }
+    $ItemId = $match.Groups[1].Value
 }
-$itemId = $match.Groups[1].Value
+$itemId = $ItemId
 
 $repoText = [System.IO.File]::ReadAllText($RepoInfo, [System.Text.Encoding]::UTF8)
 $existing = [regex]::Match($repoText, '(?m)^\s*publishedFileId\s*=\s*(\d+)\s*$')
