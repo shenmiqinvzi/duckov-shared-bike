@@ -2,6 +2,8 @@
 
 **创意工坊条目**：<https://steamcommunity.com/sharedfiles/filedetails/?id=3834463519>（2026-11-06 首发 1.0.16，更新请沿用同一条目，不要重复新建）
 
+**免工坊下载**：[dist/DuckovSharedBike-1.0.17.zip](dist/DuckovSharedBike-1.0.17.zip)（975,894 字节，SHA256 `D7755E50…7245C0`，手动安装见 [dist/README.md](dist/README.md)）
+
 当前版本：**1.0.17 站点加密版**（2026-11-06）。玩法层面只动一件事：**租还站点从九处加密到十五处**，仍然只在农场镇、仓库区、零号区三张图，数量关系按 农场镇 6 > 仓库区 5 > 零号区 4 铺开（新增 `farm-east`/`farm-lab`/`farm-mid`、`wh-south-lot`/`wh-plaza`、`gz-west`），单程跑图不必再回到原来的三个点。寻位那圈候选半径从 `10/14/18/8/SearchRadius` 细化为 `10/14/18/22/26/8/SearchRadius`，密集布点更容易就近落地；布点失败不再每次重试都刷一遍日志，而是按"待就位站点集合"变化记一行 `Station sites pending safe placement`。1.0.16 的工坊上传准备（版本号读程序集、日志移出模组目录、安装保留 `publishedFileId`、512×512 封面）、1.0.15 的八角牌站点徽章、1.0.14 受伤立即下车、1.0.10 的 3 秒召车全部保留。适配本机 Windows Steam《逃离鸭科夫》2.3.30，build 24013657，Unity 2022.3.62f2；单人游戏。游戏内已试玩确认可租可骑可还，条目已上传创意工坊。
 
 ## 功能总览
